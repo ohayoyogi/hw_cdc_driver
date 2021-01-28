@@ -1871,7 +1871,11 @@ static int hw_start_xmit (struct sk_buff *skb, struct net_device *net)
         }
         break;
     case 0:
+        #if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
         net->trans_start = jiffies;
+        #else
+        netif_trans_update(net);
+        #endif
         __skb_queue_tail (&dev->txq, skb);
         if (dev->txq.qlen >= TX_QLEN (dev)){
             netif_stop_queue (net);
@@ -1902,9 +1906,15 @@ drop:
 
 // tasklet (work deferred from completions, in_irq) or timer
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
 static void hw_bh (unsigned long param)
 {
     struct hw_cdc_net        *dev = (struct hw_cdc_net *) param;
+#else
+static void hw_bh (struct timer_list *t0)
+{
+    struct hw_cdc_net        *dev = from_timer(dev, t0, delay);
+#endif
     struct sk_buff        *skb;
     struct skb_data        *entry;
 
@@ -1965,6 +1975,15 @@ static void hw_bh (unsigned long param)
     }
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
+#else
+static void hw_bh_tasklet(unsigned long data)
+{
+    struct timer_list *t = (struct timer_list *)data;
+
+    hw_bh(t);
+}
+#endif
 
 /*-------------------------------------------------------------------------
  *
@@ -1995,8 +2014,8 @@ void hw_disconnect (struct usb_interface *intf)
             dev->driver_desc);
     }
 
-    /*Í¬²½È¡Ïû¿ÉÄÜ×¢²áµÄÑÓ³Ù¹¤×÷½ø³Ì£¬Èç¹û¸Ã¹¤×÷½ø³ÌÒÑ¾­ÔÚÖ´ÐÐÁË£¬
-    ÔòÔÚÕâÀï£¬ÐèÒªµÈ´ý¸Ã¹¤×÷½ø³ÌÖ´ÐÐÍê³ÉÖ®ºó£¬discconect²Å»á¼ÌÐøÍùÏÂÖ´ÐÐ¡£*/
+    /*Í¬ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½Ó³Ù¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì£ï¿½ï¿½ï¿½ï¿½ï¿½Ã¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¾ï¿½ï¿½ï¿½Ö´ï¿½ï¿½ï¿½Ë£ï¿½
+    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï£¬ï¿½ï¿½Òªï¿½È´ï¿½ï¿½Ã¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö´ï¿½ï¿½ï¿½ï¿½ï¿½Ö®ï¿½ï¿½discconectï¿½Å»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö´ï¿½Ð¡ï¿½*/
     cancel_delayed_work_sync(&dev->status_work);//Added by fangxz 2010-3-26
 
     net = dev->net;
@@ -2034,7 +2053,7 @@ static const struct net_device_ops hw_netdev_ops = {
     .ndo_change_mtu = hw_change_mtu,
     .ndo_set_mac_address = hw_eth_mac_addr,
     .ndo_validate_addr = eth_validate_addr,
-    .ndo_get_stats = hw_get_stats, //ÓÃÓÚÁ÷Á¿Í³¼Æ
+    .ndo_get_stats = hw_get_stats, //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í³ï¿½ï¿½
 };
 #endif
 
@@ -2683,9 +2702,15 @@ exit:
     return skb2;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
 static void ncm_tx_timer_cb(unsigned long param)
 {
     struct ncm_ctx *ctx = (void *)param;
+#else
+static void ncm_tx_timer_cb(struct timer_list *t0)
+{
+    struct ncm_ctx *ctx = from_timer(ctx, t0, tx_timer);
+#endif
     if (!netif_queue_stopped(ctx->ndev->net)){
         hw_start_xmit(NULL, ctx->ndev->net);
     }
@@ -2715,7 +2740,7 @@ hw_cdc_probe (struct usb_interface *udev, const struct usb_device_id *prod)
     // set up our own records
     net = alloc_etherdev(sizeof(*dev));
     if (!net) {
-        dbg ("can't kmalloc dev");
+        // dbg ("can't kmalloc dev");
         goto out;
     }
 
@@ -2739,12 +2764,22 @@ hw_cdc_probe (struct usb_interface *udev, const struct usb_device_id *prod)
     skb_queue_head_init (&dev->rxq);
     skb_queue_head_init (&dev->txq);
     skb_queue_head_init (&dev->done);
+    #if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
     dev->bh.func = hw_bh;
+    #else
+    dev->bh.func = hw_bh_tasklet;
+    #endif
     dev->bh.data = (unsigned long) dev;
     INIT_WORK (&dev->kevent, kevent);
-    dev->delay.function = hw_bh;
-    dev->delay.data = (unsigned long) dev;
-    init_timer (&dev->delay);
+    
+    #if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
+        dev->delay.function = hw_bh;
+        dev->delay.data = (unsigned long) dev;
+        init_timer (&dev->delay);
+    #else
+        timer_setup(&dev->delay, hw_bh, 0);
+    #endif
+
     mutex_init (&dev->phy_mutex);
 
     dev->net = net;
@@ -2952,10 +2987,13 @@ static int hw_cdc_bind(struct hw_cdc_net *dev, struct usb_interface *intf)
 
         spin_lock_init(&ctx->tx_lock);
 
-        ctx->tx_timer.function = ncm_tx_timer_cb;
-        ctx->tx_timer.data = (unsigned long)ctx;
-        init_timer(&ctx->tx_timer);
-
+        #if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
+            ctx->tx_timer.function = ncm_tx_timer_cb;
+            ctx->tx_timer.data = (unsigned long)ctx;
+            init_timer(&ctx->tx_timer);
+        #else
+            timer_setup(&ctx->tx_timer, ncm_tx_timer_cb, 0);
+        #endif
 
     if(ncm_tx_timeout){
             ctx->tx_timeout_jiffies = msecs_to_jiffies(ncm_tx_timeout);
@@ -3523,7 +3561,7 @@ op_error:
     
 
 static const struct usb_device_id    hw_products [] = {
-    /*É¾³ý¶ÔPRODUCT IDµÄ±È½Ï£¬Ä¬ÈÏÄÜ¹»Ö§³ÖËùÓÐHUAWEI_ETHER_INTERFACE ½Ó¿ÚÀàÐÍµÄNDISÉè±¸*/
+    /*É¾ï¿½ï¿½ï¿½ï¿½PRODUCT IDï¿½Ä±È½Ï£ï¿½Ä¬ï¿½ï¿½ï¿½Ü¹ï¿½Ö§ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½HUAWEI_ETHER_INTERFACE ï¿½Ó¿ï¿½ï¿½ï¿½ï¿½Íµï¿½NDISï¿½è±¸*/
     /* delete by lKF36757 2011/12/26,prevent hilink load hw_cdc_driver.ko*/
     /*
     {

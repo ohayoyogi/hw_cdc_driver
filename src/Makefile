@@ -30,7 +30,8 @@ KEXT		:= $(shell echo $(KVER) | sed -ne 's/^2\.[567]\..*/k/p')o
 
 modules:
 	#$(PWD)/src/add_header.sh  "modules" "$(KDIR)/include/linux/usb"
-	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD)/src modules
+	$(MAKE) -C $(KDIR) M=$(PWD)/src modules
+	# $(MAKE) -C $(KDIR) SUBDIRS=$(PWD)/src modules
 	strip --strip-debug hw_cdc_driver.$(KEXT)
 
 clean:
